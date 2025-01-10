@@ -6,6 +6,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; // 保持消息通道开启
     }
+    
+    if (request.type === 'GET_UTILS') {
+        // 返回工具函数的实现
+        sendResponse({
+            utils: {
+                parseUsername: (text) => {
+                    if (!text) return null;
+                    text = text.trim();
+                    if (text.startsWith('@')) text = text.substring(1);
+                    return text.split('/').pop().split('?')[0];
+                },
+                addTwitterSubscription: async (username) => {
+                    return chrome.runtime.sendMessage({
+                        type: 'ADD_SUBSCRIPTION',
+                        username
+                    });
+                },
+                getSubscribedUsers: async () => {
+                    const result = await chrome.storage.local.get('subscribedUsers');
+                    return result.subscribedUsers || [];
+                },
+                addSubscribedUser: async (username) => {
+                    const users = await this.getSubscribedUsers();
+                    if (!users.includes(username)) {
+                        users.push(username);
+                        await chrome.storage.local.set({ subscribedUsers: users });
+                    }
+                },
+                isUserSubscribed: async (username) => {
+                    const users = await this.getSubscribedUsers();
+                    return users.includes(username);
+                }
+            }
+        });
+        return true;
+    }
 });
 
 // 处理添加订阅的请求

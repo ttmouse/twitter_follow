@@ -7,14 +7,47 @@ let utils = null;
 async function loadUtils() {
     if (utils) return utils;
     
-    const utilsUrl = chrome.runtime.getURL('utils.js');
-    const response = await fetch(utilsUrl);
-    const code = await response.text();
-    const module = { exports: {} };
-    const wrapper = Function('module', 'exports', code);
-    wrapper(module, module.exports);
-    utils = module.exports;
-    return utils;
+    try {
+        // 直接从background获取工具函数
+        const response = await chrome.runtime.sendMessage({ type: 'GET_UTILS' });
+        if (response && response.utils) {
+            utils = response.utils;
+            return utils;
+        }
+        throw new Error('无法获取工具函数');
+    } catch (error) {
+        console.error('加载工具函数失败:', error);
+        // 返回一个基本的工具函数实现
+        return {
+            parseUsername: (text) => {
+                if (!text) return null;
+                text = text.trim();
+                if (text.startsWith('@')) text = text.substring(1);
+                return text.split('/').pop().split('?')[0];
+            },
+            addTwitterSubscription: async (username) => {
+                return chrome.runtime.sendMessage({
+                    type: 'ADD_SUBSCRIPTION',
+                    username
+                });
+            },
+            getSubscribedUsers: async () => {
+                const result = await chrome.storage.local.get('subscribedUsers');
+                return result.subscribedUsers || [];
+            },
+            addSubscribedUser: async (username) => {
+                const users = await utils.getSubscribedUsers();
+                if (!users.includes(username)) {
+                    users.push(username);
+                    await chrome.storage.local.set({ subscribedUsers: users });
+                }
+            },
+            isUserSubscribed: async (username) => {
+                const users = await utils.getSubscribedUsers();
+                return users.includes(username);
+            }
+        };
+    }
 }
 
 // 获取当前 Twitter 页面的用户信息
@@ -76,107 +109,111 @@ function getCurrentTwitterUser() {
 }
 
 // 提取页面上的所有用户信息
-async function extractUsers() {
-    // 等待页面加载完成
-    await waitForUsers();
-    
+function extractUsers() {
     const users = new Map();
     
-    // 查找所有用户卡片
-    document.querySelectorAll('button[data-testid="UserCell"]').forEach(cell => {
-        try {
-            let username = null;
-            let displayName = null;
-            let avatarUrl = null;
+    // 查找所有用户卡片（包括推文中的用户信息）
+    const selectors = [
+        // followers页面的用户卡片
+        'button[data-testid="UserCell"]',
+        // 首页推文中的用户信息
+        'div[data-testid="Tweet-User-Avatar"]',
+        'div[data-testid="User-Name"]',
+        // 其他可能的用户信息容器
+        'div[data-testid="cellInnerDiv"]',
+        'article'
+    ];
 
-            // 1. 从UserAvatar-Container获取用户名
-            const avatarContainer = cell.querySelector('div[data-testid^="UserAvatar-Container-"]');
-            if (avatarContainer) {
-                const containerId = avatarContainer.getAttribute('data-testid');
-                if (containerId) {
-                    username = containerId.replace('UserAvatar-Container-', '');
-                }
-            }
+    selectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(element => {
+            try {
+                let username = null;
+                let displayName = null;
+                let avatarUrl = null;
 
-            // 2. 获取头像URL
-            const avatarImg = cell.querySelector('img.css-9pa8cd[draggable="true"]');
-            if (avatarImg && avatarImg.src) {
-                avatarUrl = avatarImg.src;
-            }
+                // 获取包含完整用户信息的父元素
+                const userCell = element.closest('div[data-testid="cellInnerDiv"]') || 
+                                element.closest('article') ||
+                                element.closest('div[data-testid="UserCell"]') ||
+                                element;
+                if (!userCell) return;
 
-            // 3. 获取显示名称
-            // 首先尝试获取主显示名称
-            const mainNameSpan = cell.querySelector('div[dir="ltr"] span.css-1jxf684 span.css-1jxf684');
-            if (mainNameSpan) {
-                displayName = mainNameSpan.textContent.trim();
-            }
-
-            // 如果没有找到显示名称，尝试其他方法
-            if (!displayName) {
-                const allSpans = cell.querySelectorAll('span.css-1jxf684');
-                for (const span of allSpans) {
-                    const text = span.textContent.trim();
-                    if (text && !text.startsWith('@') && !text.includes('@')) {
-                        displayName = text;
-                        break;
+                // 1. 从UserAvatar-Container获取用户名
+                const avatarContainer = userCell.querySelector('div[data-testid^="UserAvatar-Container-"]');
+                if (avatarContainer) {
+                    const containerId = avatarContainer.getAttribute('data-testid');
+                    if (containerId) {
+                        username = containerId.replace('UserAvatar-Container-', '');
                     }
                 }
-            }
 
-            // 如果还没有用户名，从链接获取
-            if (!username) {
-                const userLink = cell.querySelector('a[href^="/"][role="link"]');
-                if (userLink) {
-                    const href = userLink.getAttribute('href');
-                    if (href && href.startsWith('/')) {
-                        username = href.substring(1).split('/')[0];
+                // 2. 获取头像URL
+                const avatarImg = userCell.querySelector('img.css-9pa8cd[draggable="true"]');
+                if (avatarImg && avatarImg.src) {
+                    avatarUrl = avatarImg.src;
+                }
+
+                // 3. 获取显示名称
+                // 尝试多种方式获取显示名称
+                const nameSelectors = [
+                    // 主显示名称
+                    'div[dir="ltr"] span.css-1jxf684 span.css-1jxf684',
+                    // 备用选择器
+                    'div[data-testid="User-Name"] div[dir="ltr"] span span',
+                    'div[data-testid="User-Name"] div.r-bcqeeo span span',
+                    'div[dir="ltr"].r-b88u0q span span'
+                ];
+
+                for (const selector of nameSelectors) {
+                    const nameElement = userCell.querySelector(selector);
+                    if (nameElement) {
+                        const text = nameElement.textContent.trim();
+                        if (text && !text.startsWith('@') && !text.includes('@')) {
+                            displayName = text;
+                            break;
+                        }
                     }
                 }
-            }
 
-            // 确保所有必要信息都已获取
-            if (username && displayName && avatarUrl) {
-                // 清理数据
-                username = username.trim();
-                displayName = displayName.trim();
-                // 移除可能的换行符和多余空格
-                displayName = displayName.replace(/\s+/g, ' ');
-                
-                users.set(username, {
-                    username,
-                    displayName,
-                    avatarUrl
-                });
+                // 如果还没有用户名，从链接获取
+                if (!username) {
+                    const userLinks = userCell.querySelectorAll('a[href^="/"][role="link"]');
+                    for (const link of userLinks) {
+                        const href = link.getAttribute('href');
+                        if (href && href.startsWith('/')) {
+                            const potentialUsername = href.substring(1).split('/')[0];
+                            if (potentialUsername && !potentialUsername.includes('status')) {
+                                username = potentialUsername;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 确保所有必要信息都已获取
+                if (username && displayName && avatarUrl) {
+                    // 清理数据
+                    username = username.trim();
+                    displayName = displayName.trim();
+                    // 移除可能的换行符和多余空格
+                    displayName = displayName.replace(/\s+/g, ' ');
+                    
+                    // 如果已经存在相同用户名的记录，跳过
+                    if (!users.has(username)) {
+                        users.set(username, {
+                            username,
+                            displayName,
+                            avatarUrl
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('提取用户信息失败:', error);
             }
-        } catch (error) {
-            console.error('提取用户信息失败:', error);
-        }
+        });
     });
 
     return Array.from(users.values());
-}
-
-// 等待用户列表加载
-function waitForUsers() {
-    return new Promise((resolve) => {
-        let attempts = 0;
-        const maxAttempts = 10;
-        const checkInterval = 500; // 500ms
-
-        const check = () => {
-            const users = document.querySelectorAll('button[data-testid="UserCell"]');
-            if (users.length > 0) {
-                resolve();
-            } else if (attempts < maxAttempts) {
-                attempts++;
-                setTimeout(check, checkInterval);
-            } else {
-                resolve(); // 超时后也resolve，避免卡住
-            }
-        };
-
-        check();
-    });
 }
 
 // 创建订阅按钮
@@ -284,20 +321,18 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'GET_USERS') {
-        extractUsers()
-            .then(users => {
-                // 如果在用户页面，添加当前用户
-                const currentUser = getCurrentTwitterUser();
-                if (currentUser) {
-                    users.unshift(currentUser);
-                }
-                sendResponse({ users });
-            })
-            .catch(error => {
-                console.error('获取用户列表失败:', error);
-                sendResponse({ error: error.message });
-            });
-        return true; // 保持消息通道开启
+        try {
+            const users = extractUsers();
+            // 如果在用户页面，添加当前用户
+            const currentUser = getCurrentTwitterUser();
+            if (currentUser) {
+                users.unshift(currentUser);
+            }
+            sendResponse({ users });
+        } catch (error) {
+            console.error('获取用户列表失败:', error);
+            sendResponse({ error: error.message });
+        }
     }
     return true;
 });
