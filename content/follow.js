@@ -1,21 +1,5 @@
 // Follow.is 内容脚本
-
-// 全局变量存储工具函数
-let utils = null;
-
-// 动态加载工具函数
-async function loadUtils() {
-    if (utils) return utils;
-    
-    const utilsUrl = chrome.runtime.getURL('utils.js');
-    const response = await fetch(utilsUrl);
-    const code = await response.text();
-    const module = { exports: {} };
-    const wrapper = Function('module', 'exports', code);
-    wrapper(module, module.exports);
-    utils = module.exports;
-    return utils;
-}
+import { parseUsername, addTwitterSubscription, isUserSubscribed } from '../utils.js';
 
 // 获取当前 Twitter 页面的用户信息
 function getCurrentTwitterUser() {
@@ -62,52 +46,44 @@ function getCurrentTwitterUser() {
         console.error('获取用户信息失败:', error);
     }
 
-    return displayName && avatarUrl ? {
-        username,
-        displayName,
-        avatarUrl
-    } : null;
+    return displayName ? { username, displayName, avatarUrl } : null;
 }
 
-// 提取页面上的所有用户信息
+// 提取页面上的用户列表
 function extractUsers() {
     const users = new Map();
-    
-    // 查找所有用户卡片
-    document.querySelectorAll('div[data-testid="cellInnerDiv"]').forEach(cell => {
-        try {
-            // 获取用户名和显示名称
-            const userNameElement = cell.querySelector('div[data-testid="User-Name"]');
-            if (!userNameElement) return;
 
+    // 查找所有用户名元素
+    document.querySelectorAll('div[data-testid="User-Name"]').forEach(element => {
+        try {
             let username = null;
             let displayName = null;
-            
-            // 遍历所有文本节点找到用户名和显示名称
-            const spans = userNameElement.querySelectorAll('span');
-            spans.forEach(span => {
+            let avatarUrl = null;
+
+            // 获取用户名和显示名称
+            const spans = element.querySelectorAll('span');
+            for (const span of spans) {
                 const text = span.textContent.trim();
                 if (text.startsWith('@')) {
                     username = text.substring(1);
                 } else if (!displayName) {
                     displayName = text;
                 }
-            });
+            }
 
-            if (!username || !displayName) return;
+            if (username) {
+                // 获取头像
+                const avatarImg = document.querySelector(`img[data-testid="UserAvatar-Container-${username}"]`);
+                if (avatarImg) {
+                    avatarUrl = avatarImg.src;
+                }
 
-            // 获取头像
-            const avatarImg = cell.querySelector('img[src*="profile_images"]');
-            if (!avatarImg) return;
-
-            const avatarUrl = avatarImg.src;
-
-            // 添加到用户列表
-            users.set(username, {
-                username,
-                displayName,
-                avatarUrl
-            });
+                users.set(username, {
+                    username,
+                    displayName: displayName || username,
+                    avatarUrl
+                });
+            }
         } catch (error) {
             console.error('提取用户信息失败:', error);
         }
@@ -118,16 +94,12 @@ function extractUsers() {
 
 // 创建订阅按钮
 async function createSubscribeButton(defaultUsername = null, displayName = null) {
-    // 1. 加载工具函数
-    const utils = await loadUtils();
-    const { parseUsername, addTwitterSubscription } = utils;
-
-    // 2. 检查是否已存在按钮
+    // 1. 检查是否已存在按钮
     if (document.getElementById('clipboard-subscribe-btn')) {
         return;
     }
 
-    // 3. 创建按钮
+    // 2. 创建按钮
     const button = document.createElement('button');
     button.id = 'clipboard-subscribe-btn';
     button.innerHTML = defaultUsername ? 
@@ -149,7 +121,7 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
         transition: all 0.3s ease;
     `;
 
-    // 4. 添加悬停效果
+    // 3. 添加悬停效果
     button.onmouseover = () => {
         button.style.transform = 'scale(1.05)';
         button.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
@@ -159,7 +131,7 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
         button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
     };
 
-    // 5. 添加点击事件
+    // 4. 添加点击事件
     button.onclick = async () => {
         try {
             let username = defaultUsername;
@@ -214,7 +186,7 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
         }
     };
 
-    // 6. 添加到页面
+    // 5. 添加到页面
     document.body.appendChild(button);
 }
 
@@ -240,9 +212,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // 初始化函数
 async function init() {
     try {
-        // 加载工具函数
-        await loadUtils();
-
         // 检查是否在 Twitter 页面
         const isTwitter = window.location.hostname.includes('twitter.com') || 
                          window.location.hostname.includes('x.com');
@@ -278,7 +247,7 @@ async function init() {
                         }
                     }
                 }
-            }).observe(document, { subtree: true, childList: true });
+            }).observe(document.body, { childList: true, subtree: true });
         }
 
         console.log('Twitter Follow 内容脚本初始化完成');
@@ -287,9 +256,5 @@ async function init() {
     }
 }
 
-// 确保在页面加载完成后初始化
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-} else {
-    init();
-} 
+// 执行初始化
+init(); 

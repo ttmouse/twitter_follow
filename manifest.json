@@ -32,7 +32,8 @@
                 "https://*.twitter.com/*",
                 "https://*.x.com/*"
             ],
-            "js": ["utils.js", "content/follow.js"]
+            "js": ["utils.js", "content/follow.js"],
+            "type": "module"
         }
     ],
     "web_accessible_resources": [

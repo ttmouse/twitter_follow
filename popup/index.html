@@ -27,22 +27,36 @@
         }
         .header h3 {
             margin: 0;
-            font-size: 16px;
-            color: #1da1f2;
+            font-size: 14px;
+            color: #333;
+            font-weight: normal;
+        }
+        .header .stats {
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
+        }
+        .header-content {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
         }
         .header-buttons {
             display: flex;
             gap: 8px;
+            flex-shrink: 0;
         }
         .batch-subscribe-btn {
             background-color: #1da1f2;
             color: white;
             border: none;
             border-radius: 4px;
-            padding: 4px 8px;
+            padding: 4px 12px;
             font-size: 12px;
             cursor: pointer;
             transition: background-color 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         .batch-subscribe-btn:hover {
             background-color: #1991db;
@@ -175,7 +189,10 @@
 <body>
     <div class="container">
         <div class="header">
-            <h3>Follow.is Twitter 订阅助手</h3>
+            <div class="header-content">
+                <h3>Follow.is Twitter 订阅助手</h3>
+                <div class="stats"></div>
+            </div>
             <div class="header-buttons">
                 <button id="batchSubscribeBtn" class="batch-subscribe-btn">批量订阅</button>
                 <button id="refreshBtn" class="refresh-btn" title="刷新">
@@ -190,7 +207,6 @@
         </div>
         <div id="status" class="status"></div>
     </div>
-    <script src="../utils.js"></script>
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
 </body>
 </html> 
