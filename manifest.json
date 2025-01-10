@@ -6,8 +6,7 @@
     "permissions": [
         "activeTab",
         "scripting",
-        "storage",
-        "tabs"
+        "storage"
     ],
     "host_permissions": [
         "https://api.follow.is/*",
@@ -32,8 +31,7 @@
                 "https://*.twitter.com/*",
                 "https://*.x.com/*"
             ],
-            "js": ["utils.js", "content/follow.js"],
-            "type": "module"
+            "js": ["utils.js", "content/follow.js"]
         }
     ],
     "web_accessible_resources": [

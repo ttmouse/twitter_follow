@@ -1,5 +1,5 @@
 // 解析用户名
-export function parseUsername(text) {
+function parseUsername(text) {
     if (!text) return null;
 
     // 移除空白字符
@@ -28,7 +28,7 @@ export function parseUsername(text) {
 }
 
 // 添加 Twitter 订阅
-export async function addTwitterSubscription(username) {
+async function addTwitterSubscription(username) {
     try {
         const response = await chrome.runtime.sendMessage({
             type: 'ADD_SUBSCRIPTION',
@@ -49,13 +49,13 @@ export async function addTwitterSubscription(username) {
 }
 
 // 获取已订阅用户列表
-export async function getSubscribedUsers() {
+async function getSubscribedUsers() {
     const subscribedUsers = await chrome.storage.local.get('subscribedUsers');
     return subscribedUsers.subscribedUsers || [];
 }
 
 // 添加已订阅用户
-export async function addSubscribedUser(username) {
+async function addSubscribedUser(username) {
     const users = await getSubscribedUsers();
     if (!users.includes(username)) {
         users.push(username);
@@ -64,7 +64,18 @@ export async function addSubscribedUser(username) {
 }
 
 // 检查用户是否已订阅
-export async function isUserSubscribed(username) {
+async function isUserSubscribed(username) {
     const users = await getSubscribedUsers();
     return users.includes(username);
+}
+
+// 导出工具函数
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        parseUsername,
+        addTwitterSubscription,
+        getSubscribedUsers,
+        addSubscribedUser,
+        isUserSubscribed
+    };
 } 
