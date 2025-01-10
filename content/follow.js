@@ -23,15 +23,21 @@ function getCurrentTwitterUser() {
     const path = window.location.pathname;
     if (!path) return null;
 
-    // 移除开头的斜杠
-    const username = path.split('/')[1];
-    if (!username) return null;
+    // 移除开头的斜杠并分割路径
+    const pathParts = path.split('/').filter(part => part);
+    if (!pathParts.length) return null;
+
+    // 获取用户名（路径的第一部分）
+    const username = pathParts[0];
 
     // 排除特殊页面
     const excludedPaths = ['home', 'explore', 'notifications', 'messages', 'search'];
     if (excludedPaths.includes(username.toLowerCase())) {
         return null;
     }
+
+    // 检查是否是followers页面，如果是，仍然返回主用户信息
+    const isFollowersPage = pathParts.length > 1 && pathParts[1].toLowerCase() === 'followers';
 
     // 尝试获取显示名称
     let displayName = null;
@@ -70,50 +76,107 @@ function getCurrentTwitterUser() {
 }
 
 // 提取页面上的所有用户信息
-function extractUsers() {
+async function extractUsers() {
+    // 等待页面加载完成
+    await waitForUsers();
+    
     const users = new Map();
     
     // 查找所有用户卡片
-    document.querySelectorAll('div[data-testid="cellInnerDiv"]').forEach(cell => {
+    document.querySelectorAll('button[data-testid="UserCell"]').forEach(cell => {
         try {
-            // 获取用户名和显示名称
-            const userNameElement = cell.querySelector('div[data-testid="User-Name"]');
-            if (!userNameElement) return;
-
             let username = null;
             let displayName = null;
-            
-            // 遍历所有文本节点找到用户名和显示名称
-            const spans = userNameElement.querySelectorAll('span');
-            spans.forEach(span => {
-                const text = span.textContent.trim();
-                if (text.startsWith('@')) {
-                    username = text.substring(1);
-                } else if (!displayName) {
-                    displayName = text;
+            let avatarUrl = null;
+
+            // 1. 从UserAvatar-Container获取用户名
+            const avatarContainer = cell.querySelector('div[data-testid^="UserAvatar-Container-"]');
+            if (avatarContainer) {
+                const containerId = avatarContainer.getAttribute('data-testid');
+                if (containerId) {
+                    username = containerId.replace('UserAvatar-Container-', '');
                 }
-            });
+            }
 
-            if (!username || !displayName) return;
+            // 2. 获取头像URL
+            const avatarImg = cell.querySelector('img.css-9pa8cd[draggable="true"]');
+            if (avatarImg && avatarImg.src) {
+                avatarUrl = avatarImg.src;
+            }
 
-            // 获取头像
-            const avatarImg = cell.querySelector('img[src*="profile_images"]');
-            if (!avatarImg) return;
+            // 3. 获取显示名称
+            // 首先尝试获取主显示名称
+            const mainNameSpan = cell.querySelector('div[dir="ltr"] span.css-1jxf684 span.css-1jxf684');
+            if (mainNameSpan) {
+                displayName = mainNameSpan.textContent.trim();
+            }
 
-            const avatarUrl = avatarImg.src;
+            // 如果没有找到显示名称，尝试其他方法
+            if (!displayName) {
+                const allSpans = cell.querySelectorAll('span.css-1jxf684');
+                for (const span of allSpans) {
+                    const text = span.textContent.trim();
+                    if (text && !text.startsWith('@') && !text.includes('@')) {
+                        displayName = text;
+                        break;
+                    }
+                }
+            }
 
-            // 添加到用户列表
-            users.set(username, {
-                username,
-                displayName,
-                avatarUrl
-            });
+            // 如果还没有用户名，从链接获取
+            if (!username) {
+                const userLink = cell.querySelector('a[href^="/"][role="link"]');
+                if (userLink) {
+                    const href = userLink.getAttribute('href');
+                    if (href && href.startsWith('/')) {
+                        username = href.substring(1).split('/')[0];
+                    }
+                }
+            }
+
+            // 确保所有必要信息都已获取
+            if (username && displayName && avatarUrl) {
+                // 清理数据
+                username = username.trim();
+                displayName = displayName.trim();
+                // 移除可能的换行符和多余空格
+                displayName = displayName.replace(/\s+/g, ' ');
+                
+                users.set(username, {
+                    username,
+                    displayName,
+                    avatarUrl
+                });
+            }
         } catch (error) {
             console.error('提取用户信息失败:', error);
         }
     });
 
     return Array.from(users.values());
+}
+
+// 等待用户列表加载
+function waitForUsers() {
+    return new Promise((resolve) => {
+        let attempts = 0;
+        const maxAttempts = 10;
+        const checkInterval = 500; // 500ms
+
+        const check = () => {
+            const users = document.querySelectorAll('button[data-testid="UserCell"]');
+            if (users.length > 0) {
+                resolve();
+            } else if (attempts < maxAttempts) {
+                attempts++;
+                setTimeout(check, checkInterval);
+            } else {
+                resolve(); // 超时后也resolve，避免卡住
+            }
+        };
+
+        check();
+    });
 }
 
 // 创建订阅按钮
@@ -221,18 +284,20 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'GET_USERS') {
-        try {
-            const users = extractUsers();
-            // 如果在用户页面，添加当前用户
-            const currentUser = getCurrentTwitterUser();
-            if (currentUser) {
-                users.unshift(currentUser);
-            }
-            sendResponse({ users });
-        } catch (error) {
-            console.error('获取用户列表失败:', error);
-            sendResponse({ error: error.message });
-        }
+        extractUsers()
+            .then(users => {
+                // 如果在用户页面，添加当前用户
+                const currentUser = getCurrentTwitterUser();
+                if (currentUser) {
+                    users.unshift(currentUser);
+                }
+                sendResponse({ users });
+            })
+            .catch(error => {
+                console.error('获取用户列表失败:', error);
+                sendResponse({ error: error.message });
+            });
+        return true; // 保持消息通道开启
     }
     return true;
 });

@@ -34,14 +34,21 @@ document.addEventListener('DOMContentLoaded', () => {
             batchSubscribeBtn.textContent = '订阅中...';
             let successCount = 0;
             let failCount = 0;
+            let skipCount = 0;
 
             // 遍历所有用户进行订阅
             for (const user of usersList) {
+                const subscribeBtn = document.querySelector(`[data-username="${user.username}"]`);
+                // 如果按钮已经是订阅状态，跳过
+                if (subscribeBtn && subscribeBtn.classList.contains('subscribed')) {
+                    skipCount++;
+                    continue;
+                }
+
                 try {
                     await addTwitterSubscription(user.username);
                     successCount++;
                     // 更新对应用户的订阅按钮状态
-                    const subscribeBtn = document.querySelector(`[data-username="${user.username}"]`);
                     if (subscribeBtn) {
                         subscribeBtn.textContent = '已订阅';
                         subscribeBtn.classList.add('subscribed');
@@ -55,12 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 更新状态信息
-            if (successCount > 0) {
-                updateStatus(`成功订阅 ${successCount} 个用户${failCount > 0 ? `，${failCount} 个失败` : ''}`, 
-                    failCount > 0 ? 'warning' : 'success');
-            } else {
-                updateStatus('订阅失败！', 'error');
-            }
+            let message = [];
+            if (successCount > 0) message.push(`成功订阅 ${successCount} 个用户`);
+            if (skipCount > 0) message.push(`跳过 ${skipCount} 个已订阅用户`);
+            if (failCount > 0) message.push(`${failCount} 个失败`);
+
+            updateStatus(message.join('，'), failCount > 0 ? 'warning' : 'success');
         } catch (error) {
             console.error('批量订阅失败:', error);
             updateStatus('批量订阅失败！', 'error');
