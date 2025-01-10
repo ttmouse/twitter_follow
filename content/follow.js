@@ -1,14 +1,20 @@
 // Follow.is 内容脚本
 
+// 全局变量存储工具函数
+let utils = null;
+
 // 动态加载工具函数
 async function loadUtils() {
+    if (utils) return utils;
+    
     const utilsUrl = chrome.runtime.getURL('utils.js');
     const response = await fetch(utilsUrl);
     const code = await response.text();
     const module = { exports: {} };
     const wrapper = Function('module', 'exports', code);
     wrapper(module, module.exports);
-    return module.exports;
+    utils = module.exports;
+    return utils;
 }
 
 // 获取当前 Twitter 页面的用户信息
@@ -215,64 +221,75 @@ async function createSubscribeButton(defaultUsername = null, displayName = null)
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'GET_USERS') {
-        const users = extractUsers();
-        // 如果在用户页面，添加当前用户
-        const currentUser = getCurrentTwitterUser();
-        if (currentUser) {
-            users.unshift(currentUser);
+        try {
+            const users = extractUsers();
+            // 如果在用户页面，添加当前用户
+            const currentUser = getCurrentTwitterUser();
+            if (currentUser) {
+                users.unshift(currentUser);
+            }
+            sendResponse({ users });
+        } catch (error) {
+            console.error('获取用户列表失败:', error);
+            sendResponse({ error: error.message });
         }
-        sendResponse({ users });
     }
     return true;
 });
 
 // 初始化函数
 async function init() {
-    // 检查是否在 Twitter 页面
-    const isTwitter = window.location.hostname.includes('twitter.com') || 
-                     window.location.hostname.includes('x.com');
-    
-    if (isTwitter) {
-        // 在 Twitter 页面，尝试获取当前用户信息
-        const userInfo = getCurrentTwitterUser();
-        if (userInfo) {
-            await createSubscribeButton(userInfo.username, userInfo.displayName);
-        } else {
-            await createSubscribeButton();
-        }
+    try {
+        // 加载工具函数
+        await loadUtils();
 
-        // 监听 URL 变化
-        let lastUrl = window.location.href;
-        new MutationObserver(async () => {
-            const currentUrl = window.location.href;
-            if (currentUrl !== lastUrl) {
-                lastUrl = currentUrl;
-                const newUserInfo = getCurrentTwitterUser();
-                const button = document.getElementById('clipboard-subscribe-btn');
-                if (button) {
-                    if (newUserInfo) {
-                        button.innerHTML = `订阅 ${newUserInfo.displayName}(@${newUserInfo.username})`;
+        // 检查是否在 Twitter 页面
+        const isTwitter = window.location.hostname.includes('twitter.com') || 
+                         window.location.hostname.includes('x.com');
+        
+        if (isTwitter) {
+            // 在 Twitter 页面，尝试获取当前用户信息
+            const userInfo = getCurrentTwitterUser();
+            if (userInfo) {
+                await createSubscribeButton(userInfo.username, userInfo.displayName);
+            } else {
+                await createSubscribeButton();
+            }
+
+            // 监听 URL 变化
+            let lastUrl = window.location.href;
+            new MutationObserver(async () => {
+                const currentUrl = window.location.href;
+                if (currentUrl !== lastUrl) {
+                    lastUrl = currentUrl;
+                    const newUserInfo = getCurrentTwitterUser();
+                    const button = document.getElementById('clipboard-subscribe-btn');
+                    if (button) {
+                        if (newUserInfo) {
+                            button.innerHTML = `订阅 ${newUserInfo.displayName}(@${newUserInfo.username})`;
+                        } else {
+                            button.innerHTML = '从剪贴板添加订阅';
+                        }
                     } else {
-                        button.innerHTML = '从剪贴板添加订阅';
-                    }
-                } else {
-                    if (newUserInfo) {
-                        await createSubscribeButton(newUserInfo.username, newUserInfo.displayName);
-                    } else {
-                        await createSubscribeButton();
+                        if (newUserInfo) {
+                            await createSubscribeButton(newUserInfo.username, newUserInfo.displayName);
+                        } else {
+                            await createSubscribeButton();
+                        }
                     }
                 }
-            }
-        }).observe(document, { subtree: true, childList: true });
-    } else {
-        // 在其他页面，使用默认行为
-        await createSubscribeButton();
+            }).observe(document, { subtree: true, childList: true });
+        }
+
+        console.log('Twitter Follow 内容脚本初始化完成');
+    } catch (error) {
+        console.error('Twitter Follow 内容脚本初始化失败:', error);
     }
 }
 
-// 在页面加载完成后初始化
-if (document.readyState === 'complete') {
-    init();
+// 确保在页面加载完成后初始化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
 } else {
-    window.addEventListener('load', init);
+    init();
 } 

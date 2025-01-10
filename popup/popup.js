@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // 创建用户列表项
-    function createUserItem(user) {
+    async function createUserItem(user) {
         const item = document.createElement('div');
         item.className = 'user-item';
         
@@ -93,29 +93,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const subscribeBtn = document.createElement('button');
         subscribeBtn.className = 'subscribe-btn';
-        subscribeBtn.textContent = '订阅';
         subscribeBtn.dataset.username = user.username;
         
-        subscribeBtn.onclick = async () => {
-            try {
-                subscribeBtn.disabled = true;
-                subscribeBtn.textContent = '处理中...';
-                
-                await addTwitterSubscription(user.username);
-                
-                subscribeBtn.textContent = '已订阅';
-                subscribeBtn.classList.add('subscribed');
-                updateStatus(`成功订阅 ${user.displayName || user.username}！`, 'success');
-                setTimeout(() => {
-                    status.className = 'status';
-                }, 2000);
-            } catch (error) {
-                console.error('订阅失败:', error);
-                subscribeBtn.textContent = '订阅';
-                subscribeBtn.disabled = false;
-                updateStatus(error.message || '订阅失败！', 'error');
-            }
-        };
+        // 检查是否已订阅
+        const isSubscribed = await isUserSubscribed(user.username);
+        if (isSubscribed) {
+            subscribeBtn.textContent = '已订阅';
+            subscribeBtn.classList.add('subscribed');
+            subscribeBtn.disabled = true;
+        } else {
+            subscribeBtn.textContent = '订阅';
+            
+            subscribeBtn.onclick = async () => {
+                try {
+                    subscribeBtn.disabled = true;
+                    subscribeBtn.textContent = '处理中...';
+                    
+                    await addTwitterSubscription(user.username);
+                    
+                    subscribeBtn.textContent = '已订阅';
+                    subscribeBtn.classList.add('subscribed');
+                    subscribeBtn.disabled = true;
+                    
+                    updateStatus(`成功订阅 @${user.username}`, 'success');
+                } catch (error) {
+                    console.error(`订阅 ${user.username} 失败:`, error);
+                    subscribeBtn.disabled = false;
+                    subscribeBtn.textContent = '订阅';
+                    updateStatus(`订阅 @${user.username} 失败: ${error.message}`, 'error');
+                }
+            };
+        }
 
         item.appendChild(subscribeBtn);
         return item;
@@ -133,10 +141,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('无法获取当前标签页');
             }
 
+            // 检查是否在Twitter页面
+            if (!tab.url || !tab.url.match(/https:\/\/(.*\.)?(twitter\.com|x\.com)/)) {
+                throw new Error('请在Twitter页面使用此扩展');
+            }
+
+            // 注入内容脚本
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['utils.js', 'content/follow.js']
+                });
+            } catch (error) {
+                console.error('注入脚本失败:', error);
+                // 如果是因为脚本已经存在而失败，我们可以继续
+                if (!error.message.includes('already exists')) {
+                    throw new Error('无法访问页面，请刷新后重试');
+                }
+            }
+
+            // 等待一下确保脚本加载完成
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             // 从页面获取用户列表
             const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_USERS' });
+            if (response.error) {
+                throw new Error(response.error);
+            }
             if (!response || !response.users) {
-                throw new Error('无法获取用户列表');
+                throw new Error('无法获取用户列表，请刷新页面后重试');
             }
 
             usersList = response.users; // 保存用户列表供批量订阅使用
@@ -149,12 +182,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             batchSubscribeBtn.disabled = false;
             userList.innerHTML = '';
-            usersList.forEach(user => {
-                userList.appendChild(createUserItem(user));
-            });
+            
+            // 异步创建所有用户列表项
+            const userItems = await Promise.all(usersList.map(user => createUserItem(user)));
+            userItems.forEach(item => userList.appendChild(item));
         } catch (error) {
             console.error('获取用户列表失败:', error);
-            userList.innerHTML = '<div class="no-users">获取用户列表失败</div>';
+            userList.innerHTML = `<div class="no-users">${error.message}</div>`;
             batchSubscribeBtn.disabled = true;
         }
     }

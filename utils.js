@@ -39,6 +39,8 @@ async function addTwitterSubscription(username) {
             throw new Error(response.error || '订阅失败');
         }
 
+        // 订阅成功后保存到本地存储
+        await addSubscribedUser(username);
         return response.data;
     } catch (error) {
         console.error('添加订阅失败:', error);
@@ -46,10 +48,34 @@ async function addTwitterSubscription(username) {
     }
 }
 
+// 获取已订阅用户列表
+async function getSubscribedUsers() {
+    const subscribedUsers = await chrome.storage.local.get('subscribedUsers');
+    return subscribedUsers.subscribedUsers || [];
+}
+
+// 添加已订阅用户
+async function addSubscribedUser(username) {
+    const users = await getSubscribedUsers();
+    if (!users.includes(username)) {
+        users.push(username);
+        await chrome.storage.local.set({ subscribedUsers: users });
+    }
+}
+
+// 检查用户是否已订阅
+async function isUserSubscribed(username) {
+    const users = await getSubscribedUsers();
+    return users.includes(username);
+}
+
 // 导出工具函数
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseUsername,
-        addTwitterSubscription
+        addTwitterSubscription,
+        getSubscribedUsers,
+        addSubscribedUser,
+        isUserSubscribed
     };
 } 
