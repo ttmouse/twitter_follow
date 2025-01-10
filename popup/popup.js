@@ -146,46 +146,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('请在Twitter页面使用此扩展');
             }
 
-            // 注入内容脚本
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    files: ['utils.js', 'content/follow.js']
-                });
-            } catch (error) {
-                console.error('注入脚本失败:', error);
-                // 如果是因为脚本已经存在而失败，我们可以继续
-                if (!error.message.includes('already exists')) {
-                    throw new Error('无法访问页面，请刷新后重试');
-                }
-            }
-
             // 等待一下确保脚本加载完成
             await new Promise(resolve => setTimeout(resolve, 500));
 
             // 从页面获取用户列表
-            const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_USERS' });
-            if (response.error) {
-                throw new Error(response.error);
-            }
-            if (!response || !response.users) {
-                throw new Error('无法获取用户列表，请刷新页面后重试');
-            }
+            try {
+                const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_USERS' });
+                if (!response) {
+                    throw new Error('无法获取用户列表，请刷新页面后重试');
+                }
+                if (response.error) {
+                    throw new Error(response.error);
+                }
+                if (!response.users) {
+                    throw new Error('无法获取用户列表，请刷新页面后重试');
+                }
 
-            usersList = response.users; // 保存用户列表供批量订阅使用
-            
-            if (usersList.length === 0) {
-                userList.innerHTML = '<div class="no-users">没有找到可订阅的用户</div>';
+                usersList = response.users; // 保存用户列表供批量订阅使用
+                
+                if (usersList.length === 0) {
+                    userList.innerHTML = '<div class="no-users">没有找到可订阅的用户</div>';
+                    batchSubscribeBtn.disabled = true;
+                    return;
+                }
+
+                batchSubscribeBtn.disabled = false;
+                userList.innerHTML = '';
+                
+                // 异步创建所有用户列表项
+                const userItems = await Promise.all(usersList.map(user => createUserItem(user)));
+                userItems.forEach(item => userList.appendChild(item));
+            } catch (error) {
+                console.error('获取用户列表失败:', error);
+                userList.innerHTML = `<div class="no-users">${error.message}</div>`;
                 batchSubscribeBtn.disabled = true;
-                return;
             }
-
-            batchSubscribeBtn.disabled = false;
-            userList.innerHTML = '';
-            
-            // 异步创建所有用户列表项
-            const userItems = await Promise.all(usersList.map(user => createUserItem(user)));
-            userItems.forEach(item => userList.appendChild(item));
         } catch (error) {
             console.error('获取用户列表失败:', error);
             userList.innerHTML = `<div class="no-users">${error.message}</div>`;
